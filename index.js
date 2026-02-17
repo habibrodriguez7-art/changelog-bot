@@ -4,7 +4,7 @@ const Groq = require('groq-sdk');
 const fs = require('fs');
 const path = require('path');
 
-// Inisialisasi Groq AI
+// Inisialisasi Lynx AI
 let groq = null;
 if (process.env.GROQ_API_KEY) {
     groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -98,13 +98,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 // ═══════════════════════════════════════════
-//  Handler: /ask Command (Groq Compound AI + Web Search)
+//  Handler: /ask Command (Lynx AI + Web Search)
 // ═══════════════════════════════════════════
 
 async function handleAskCommand(interaction) {
     if (!groq) {
         return interaction.reply({
-            content: 'Groq AI belum dikonfigurasi. Tambahkan GROQ_API_KEY di environment variables.',
+            content: 'Lynx AI belum dikonfigurasi. Tambahkan GROQ_API_KEY di environment variables.',
             flags: MessageFlags.Ephemeral
         });
     }
@@ -150,12 +150,12 @@ async function handleAskCommand(interaction) {
             .setTitle(question.length > 256 ? question.substring(0, 253) + '...' : question)
             .setDescription(trimmed)
             .setColor(0xF55036)
-            .setFooter({ text: `Dijawab oleh Groq AI 🌐 | Ditanya oleh ${interaction.user.username}` })
+            .setFooter({ text: `Dijawab oleh Lynx AI 🌐 | Ditanya oleh ${interaction.user.username}` })
             .setTimestamp();
 
         await interaction.editReply({ embeds: [embed] });
     } catch (error) {
-        console.error('Error Groq AI:', error.message);
+        console.error('Error Lynx AI:', error.message);
         await interaction.editReply({
             content: `Gagal mendapatkan jawaban dari AI: ${error.message}`
         });

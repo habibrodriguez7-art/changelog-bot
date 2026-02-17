@@ -3,7 +3,7 @@ const { SlashCommandBuilder } = require('discord.js');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('ask')
-        .setDescription('Tanya AI (Gemini) apapun')
+        .setDescription('Tanya Lynx AI apapun')
         .addStringOption(option =>
             option
                 .setName('pertanyaan')
