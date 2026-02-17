@@ -1,18 +1,14 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Collection, EmbedBuilder, Events, MessageFlags } = require('discord.js');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const http = require('http');
+const Groq = require('groq-sdk');
+const DDG = require('duck-duck-scrape');
 const fs = require('fs');
 const path = require('path');
 
-// Inisialisasi Gemini AI
-let genAI = null;
-let geminiModel = null;
-if (process.env.GEMINI_API_KEY) {
-    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    geminiModel = genAI.getGenerativeModel({
-        model: 'gemini-2.0-flash-lite',
-    });
+// Inisialisasi Groq AI
+let groq = null;
+if (process.env.GROQ_API_KEY) {
+    groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 }
 
 // ═══════════════════════════════════════════
@@ -103,13 +99,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 // ═══════════════════════════════════════════
-//  Handler: /ask Command (Gemini AI + Search)
+//  Helper: DuckDuckGo Web Search
+// ═══════════════════════════════════════════
+
+async function searchWeb(query, maxResults = 5) {
+    try {
+        const results = await DDG.search(query, { safeSearch: DDG.SafeSearchType.MODERATE });
+        if (!results || !results.results || results.results.length === 0) {
+            return null;
+        }
+
+        // Ambil top results
+        const topResults = results.results.slice(0, maxResults);
+        const formatted = topResults.map((r, i) => {
+            return `[${i + 1}] ${r.title}\n${r.description}\nSource: ${r.url}`;
+        }).join('\n\n');
+
+        return formatted;
+    } catch (error) {
+        console.error('Web search error:', error.message);
+        return null;
+    }
+}
+
+// ═══════════════════════════════════════════
+//  Handler: /ask Command (Groq AI + Web Search)
 // ═══════════════════════════════════════════
 
 async function handleAskCommand(interaction) {
-    if (!geminiModel) {
+    if (!groq) {
         return interaction.reply({
-            content: 'Gemini AI belum dikonfigurasi. Tambahkan GEMINI_API_KEY di environment variables.',
+            content: 'Groq AI belum dikonfigurasi. Tambahkan GROQ_API_KEY di environment variables.',
             flags: MessageFlags.Ephemeral
         });
     }
@@ -118,12 +138,40 @@ async function handleAskCommand(interaction) {
     await interaction.deferReply();
 
     try {
-        const result = await geminiModel.generateContent(question);
-        const response = result.response.text() || 'Tidak ada jawaban.';
+        // Step 1: Search web dulu untuk data terbaru
+        console.log(`[ASK] Searching web for: ${question}`);
+        const searchResults = await searchWeb(question);
 
-        // Cek apakah Gemini menggunakan Google Search
-        const groundingMetadata = result.response.candidates?.[0]?.groundingMetadata;
-        const usedSearch = groundingMetadata?.searchEntryPoint || groundingMetadata?.groundingChunks?.length > 0;
+        // Step 2: Build system prompt dengan tanggal hari ini + hasil search
+        const today = new Date().toLocaleDateString('id-ID', {
+            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+        });
+
+        let systemPrompt = `Kamu adalah asisten AI yang helpful dan up-to-date. Hari ini adalah ${today}.`;
+        systemPrompt += ` Jawab dalam bahasa yang sama dengan pertanyaan user (jika Bahasa Indonesia, jawab dalam Bahasa Indonesia).`;
+
+        let userMessage = question;
+
+        if (searchResults) {
+            systemPrompt += `\n\nBerikut adalah hasil pencarian web terbaru yang relevan. Gunakan informasi ini untuk memberikan jawaban yang akurat dan up-to-date. Jika informasi dari web bertentangan dengan knowledge kamu, prioritaskan informasi dari web karena lebih baru. Selalu sebutkan sumber jika memungkinkan.`;
+            userMessage = `Pertanyaan: ${question}\n\n--- Hasil Pencarian Web ---\n${searchResults}\n--- Akhir Hasil Pencarian ---\n\nBerdasarkan informasi di atas dan pengetahuanmu, jawab pertanyaan tersebut secara lengkap dan akurat.`;
+            console.log(`[ASK] Web search found results, using as context`);
+        } else {
+            systemPrompt += `\n\nJika kamu tidak yakin dengan jawaban atau informasinya mungkin sudah berubah, sampaikan bahwa jawabanmu mungkin tidak up-to-date.`;
+            console.log(`[ASK] No web search results, answering from knowledge`);
+        }
+
+        // Step 3: Kirim ke Groq dengan konteks web
+        const chatCompletion = await groq.chat.completions.create({
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userMessage }
+            ],
+            model: 'llama-3.3-70b-versatile',
+            max_tokens: 2048,
+        });
+
+        const response = chatCompletion.choices[0]?.message?.content || 'Tidak ada jawaban.';
 
         // Discord embed max 4096 chars
         const trimmed = response.length > 4000
@@ -133,25 +181,13 @@ async function handleAskCommand(interaction) {
         const embed = new EmbedBuilder()
             .setTitle(question.length > 256 ? question.substring(0, 253) + '...' : question)
             .setDescription(trimmed)
-            .setColor(0x4285F4)
-            .setFooter({ text: `Dijawab oleh Gemini AI${usedSearch ? ' 🔍 + Google Search' : ''} | Ditanya oleh ${interaction.user.username}` })
+            .setColor(0xF55036)
+            .setFooter({ text: `Dijawab oleh Groq AI ${searchResults ? '🌐 + Web Search' : '🧠'} | Ditanya oleh ${interaction.user.username}` })
             .setTimestamp();
-
-        // Tambahkan sumber dari Google Search jika ada
-        if (groundingMetadata?.groundingChunks?.length > 0) {
-            const sources = groundingMetadata.groundingChunks
-                .filter(chunk => chunk.web?.uri)
-                .slice(0, 3)
-                .map(chunk => `[${chunk.web.title || 'Sumber'}](${chunk.web.uri})`)
-                .join(' • ');
-            if (sources) {
-                embed.addFields({ name: '🔗 Sumber', value: sources });
-            }
-        }
 
         await interaction.editReply({ embeds: [embed] });
     } catch (error) {
-        console.error('Error Gemini AI:', error.message);
+        console.error('Error Groq AI:', error.message);
         await interaction.editReply({
             content: `Gagal mendapatkan jawaban dari AI: ${error.message}`
         });
@@ -297,17 +333,5 @@ if (!process.env.DISCORD_TOKEN || process.env.DISCORD_TOKEN === 'YOUR_BOT_TOKEN_
     console.error('');
     process.exit(1);
 }
-
-// ═══════════════════════════════════════════
-//  Health Check Server (untuk Railway)
-// ═══════════════════════════════════════════
-
-const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Bot is running!');
-}).listen(PORT, () => {
-    console.log(`Health check server running on port ${PORT}`);
-});
 
 client.login(process.env.DISCORD_TOKEN);
