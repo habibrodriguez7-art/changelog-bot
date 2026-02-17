@@ -1,7 +1,6 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Collection, EmbedBuilder, Events, MessageFlags } = require('discord.js');
 const Groq = require('groq-sdk');
-const DDG = require('duck-duck-scrape');
 const fs = require('fs');
 const path = require('path');
 
@@ -99,23 +98,67 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 // ═══════════════════════════════════════════
-//  Helper: DuckDuckGo Web Search
+//  Helper: DuckDuckGo Web Search (Direct HTML)
 // ═══════════════════════════════════════════
 
 async function searchWeb(query, maxResults = 5) {
     try {
-        const results = await DDG.search(query, { safeSearch: DDG.SafeSearchType.MODERATE });
-        if (!results || !results.results || results.results.length === 0) {
+        const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html',
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `q=${encodeURIComponent(query)}`,
+        });
+
+        if (!response.ok) {
+            console.error('Search HTTP error:', response.status);
             return null;
         }
 
-        // Ambil top results
-        const topResults = results.results.slice(0, maxResults);
-        const formatted = topResults.map((r, i) => {
-            return `[${i + 1}] ${r.title}\n${r.description}\nSource: ${r.url}`;
-        }).join('\n\n');
+        const html = await response.text();
+        const results = [];
 
-        return formatted;
+        // Parse snippets from DuckDuckGo HTML
+        const snippetRegex = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+        const titleRegex = /class="result__a"[^>]*>([\s\S]*?)<\/a>/g;
+        const urlRegex = /class="result__url"[^>]*>([\s\S]*?)<\/a>/g;
+
+        // Get all titles
+        const titles = [];
+        let m;
+        while ((m = titleRegex.exec(html)) !== null) {
+            titles.push(m[1].replace(/<[^>]*>/g, '').trim());
+        }
+
+        // Get all snippets
+        const snippets = [];
+        while ((m = snippetRegex.exec(html)) !== null) {
+            snippets.push(m[1].replace(/<[^>]*>/g, '').trim());
+        }
+
+        // Get all URLs
+        const urls = [];
+        while ((m = urlRegex.exec(html)) !== null) {
+            urls.push(m[1].replace(/<[^>]*>/g, '').trim());
+        }
+
+        // Combine results
+        const count = Math.min(maxResults, titles.length, snippets.length);
+        for (let i = 0; i < count; i++) {
+            results.push(`[${i + 1}] ${titles[i]}\n${snippets[i]}${urls[i] ? '\nSource: ' + urls[i] : ''}`);
+        }
+
+        if (results.length === 0) {
+            console.log('[SEARCH] No results parsed from HTML');
+            return null;
+        }
+
+        console.log(`[SEARCH] Found ${results.length} results`);
+        return results.join('\n\n');
     } catch (error) {
         console.error('Web search error:', error.message);
         return null;
