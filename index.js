@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Collection, EmbedBuilder, Events, MessageFlags } = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
@@ -297,5 +298,17 @@ if (!process.env.DISCORD_TOKEN || process.env.DISCORD_TOKEN === 'YOUR_BOT_TOKEN_
     console.error('');
     process.exit(1);
 }
+
+// ═══════════════════════════════════════════
+//  Health Check Server (untuk Railway)
+// ═══════════════════════════════════════════
+
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot is running!');
+}).listen(PORT, () => {
+    console.log(`Health check server running on port ${PORT}`);
+});
 
 client.login(process.env.DISCORD_TOKEN);
