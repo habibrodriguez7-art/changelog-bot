@@ -29,7 +29,7 @@ module.exports = {
 
         const modal = new ModalBuilder()
             .setCustomId(customId)
-            .setTitle('📝 Buat Changelog');
+            .setTitle('Buat Changelog');
 
         // Field 1: Judul (e.g. "Update Games")
         const titleInput = new TextInputBuilder()
